@@ -135,7 +135,7 @@ jobs:
           api = HfApi()
           url = api.upload_file(
               path_or_fileobj=str(local_path),
-              path_in_repo=f"delta/{local_path.name}",
+              path_in_repo=local_path.name,
               repo_id="VIEWVIEWVIEW/pr0gramm-usercomments",
               repo_type="dataset",
               token=token,

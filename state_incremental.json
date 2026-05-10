@@ -1,7 +1,7 @@
 {
-  "last_known_id": 6996796,
-  "last_output_db": "delta\\pr0_delta_2026-W19_ids_6996796_6996303.sqlite3",
-  "last_range_from": 6996796,
-  "last_range_to": 6996303,
-  "last_run_at": "2026-05-10T14:16:03.589469+00:00"
+  "last_known_id": 6997387,
+  "last_output_db": "delta/pr0_delta_2026-W20_ids_6997387_6996963.sqlite3",
+  "last_range_from": 6997387,
+  "last_range_to": 6996963,
+  "last_run_at": "2026-05-11T03:25:35.900113+00:00"
 }
