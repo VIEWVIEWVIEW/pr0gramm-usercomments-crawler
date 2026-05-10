@@ -11,12 +11,169 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from crawler import Pr0Crawler, to_int, utc_now
+
+
+EXPECTED_ITEMS_DDL = """
+CREATE TABLE items (
+    item_id INTEGER PRIMARY KEY,
+    promoted INTEGER,
+    flags INTEGER,
+    created_at INTEGER,
+    user_name TEXT,
+    source_feed TEXT NOT NULL,
+    raw_json TEXT NOT NULL
+)
+"""
+
+EXPECTED_COMMENTS_DDL = """
+CREATE TABLE comments (
+    comment_id INTEGER PRIMARY KEY,
+    item_id INTEGER NOT NULL,
+    parent_comment_id INTEGER,
+    comment_time INTEGER,
+    score INTEGER,
+    upvotes INTEGER,
+    downvotes INTEGER,
+    user_name TEXT,
+    user_id INTEGER,
+    user_profile_url TEXT,
+    body TEXT,
+    raw_json TEXT NOT NULL
+)
+"""
+
+EXPECTED_COMMENT_INDEXES = {
+    "idx_comments_item_id": "CREATE INDEX idx_comments_item_id ON comments(item_id)",
+    "idx_comments_user_name": "CREATE INDEX idx_comments_user_name ON comments(user_name)",
+    "idx_comments_parent": "CREATE INDEX idx_comments_parent ON comments(parent_comment_id)",
+}
+
+
+def table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def table_columns(conn: sqlite3.Connection, table_name: str) -> list[str]:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return [str(row[1]) for row in rows]
+
+
+def normalize_delta_schema_to_vacuumed(conn: sqlite3.Connection) -> None:
+    """Rewrite delta DB schema to match the vacuumed dataset schema exactly."""
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        # Rebuild items with exactly the expected columns.
+        conn.execute("DROP TABLE IF EXISTS items_normalized_tmp")
+        conn.execute(EXPECTED_ITEMS_DDL.replace("items", "items_normalized_tmp", 1))
+        if table_exists(conn, "items"):
+            item_cols = set(table_columns(conn, "items"))
+            item_select = [
+                "item_id" if "item_id" in item_cols else "NULL",
+                "promoted" if "promoted" in item_cols else "NULL",
+                "flags" if "flags" in item_cols else "NULL",
+                "created_at" if "created_at" in item_cols else "NULL",
+                "user_name" if "user_name" in item_cols else "NULL",
+                "COALESCE(source_feed, 'new')" if "source_feed" in item_cols else "'new'",
+                "raw_json" if "raw_json" in item_cols else "'{}'",
+            ]
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO items_normalized_tmp(
+                    item_id, promoted, flags, created_at, user_name, source_feed, raw_json
+                )
+                SELECT
+                    {exprs}
+                FROM items
+                WHERE item_id IS NOT NULL
+                """.format(exprs=", ".join(item_select))
+            )
+
+        # Rebuild comments with exactly the expected columns.
+        conn.execute("DROP TABLE IF EXISTS comments_normalized_tmp")
+        conn.execute(EXPECTED_COMMENTS_DDL.replace("comments", "comments_normalized_tmp", 1))
+        if table_exists(conn, "comments"):
+            comment_cols = set(table_columns(conn, "comments"))
+            comment_select = [
+                "comment_id" if "comment_id" in comment_cols else "NULL",
+                "item_id" if "item_id" in comment_cols else "NULL",
+                "parent_comment_id" if "parent_comment_id" in comment_cols else "NULL",
+                "comment_time" if "comment_time" in comment_cols else "NULL",
+                "score" if "score" in comment_cols else "NULL",
+                "upvotes" if "upvotes" in comment_cols else "NULL",
+                "downvotes" if "downvotes" in comment_cols else "NULL",
+                "user_name" if "user_name" in comment_cols else "NULL",
+                "user_id" if "user_id" in comment_cols else "NULL",
+                "user_profile_url" if "user_profile_url" in comment_cols else "NULL",
+                "body" if "body" in comment_cols else "NULL",
+                "raw_json" if "raw_json" in comment_cols else "'{}'",
+            ]
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO comments_normalized_tmp(
+                    comment_id,
+                    item_id,
+                    parent_comment_id,
+                    comment_time,
+                    score,
+                    upvotes,
+                    downvotes,
+                    user_name,
+                    user_id,
+                    user_profile_url,
+                    body,
+                    raw_json
+                )
+                SELECT
+                    {exprs}
+                FROM comments
+                WHERE comment_id IS NOT NULL AND item_id IS NOT NULL
+                """.format(exprs=", ".join(comment_select))
+            )
+
+        # Drop all tables except the two normalized ones.
+        tables = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        for (table_name,) in tables:
+            t = str(table_name)
+            if t in {"items_normalized_tmp", "comments_normalized_tmp"}:
+                continue
+            conn.execute(f"DROP TABLE IF EXISTS {t}")
+
+        conn.execute("ALTER TABLE items_normalized_tmp RENAME TO items")
+        conn.execute("ALTER TABLE comments_normalized_tmp RENAME TO comments")
+
+        # Drop non-standard indexes.
+        existing_indexes = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        for (index_name,) in existing_indexes:
+            idx = str(index_name)
+            if idx not in EXPECTED_COMMENT_INDEXES:
+                conn.execute(f"DROP INDEX IF EXISTS {idx}")
+
+        # Recreate expected indexes.
+        for sql in EXPECTED_COMMENT_INDEXES.values():
+            conn.execute(sql)
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
 
 
 def parse_args() -> argparse.Namespace:
@@ -335,6 +492,9 @@ def main() -> int:
             f"item_rows={item_rows} comment_rows={comment_rows} "
             f"terminal_failures={terminal_failures} non_terminal_failures={non_terminal_failures}"
         )
+
+        normalize_delta_schema_to_vacuumed(crawler.db)
+        print("schema_normalized target=vacuumed")
 
         if non_terminal_failures > 0:
             print(
