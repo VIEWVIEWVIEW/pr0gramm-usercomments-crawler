@@ -102,6 +102,10 @@ Behavior:
 - Applies a maturity delay (default `14` days): only items older than that are included.
 - Writes one new delta DB per run with week + range in filename:
   - `pr0_delta_YYYY-Www_ids_<upper>_<lower>.sqlite3`
+- After crawling, the delta DB schema is normalized to match the vacuumed schema exactly:
+  - tables: `items`, `comments`
+  - no crawler-internal tables (e.g. `crawl_state`, `item_detail_failures`)
+  - no crawler-only columns (e.g. `crawl_time`, `detail_crawl_time`)
 - Advances `last_known_id` only if no unresolved non-terminal failures remain.
 
 ### 1) Create state file once
@@ -145,7 +149,7 @@ The workflow:
 
 - runs `crawler_incremental.py` with `--maturity-days 14`
 - uploads the newly created delta SQLite file to:
-  - `https://huggingface.co/datasets/VIEWVIEWVIEW/pr0gramm-usercomments` (path: `delta/<filename>`)
+  - `https://huggingface.co/datasets/VIEWVIEWVIEW/pr0gramm-usercomments` (path: repo root, filename only)
 - updates `state_incremental.json`
 - amends the latest GitHub commit with `state_incremental.json` only (`git commit --amend --no-edit`)
 - force-pushes with lease (`git push --force-with-lease`)
