@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# local/auth/runtime artifacts
+SESSION
+.env
+.env.*
+
+# crawler outputs (uploaded to Hugging Face, not committed here)
+delta/*.sqlite3
+

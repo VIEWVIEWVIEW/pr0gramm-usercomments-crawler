@@ -1,0 +1,157 @@
+name: Weekly Incremental Crawl
+
+on:
+  schedule:
+    - cron: "15 2 * * 1"
+  workflow_dispatch:
+    inputs:
+      maturity_days:
+        description: "Only crawl items older than N days"
+        required: false
+        default: "14"
+      req_threads:
+        description: "Parallel /items/info request threads"
+        required: false
+        default: "4"
+      scan_max_pages:
+        description: "Optional feed scan safety limit"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-incremental-crawl
+  cancel-in-progress: false
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests huggingface_hub
+
+      - name: Validate required files and secrets
+        env:
+          PR0_COOKIE_ME: ${{ secrets.PR0_COOKIE_ME }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ ! -f "state_incremental.json" ]; then
+            echo "Missing state_incremental.json in repository root."
+            exit 1
+          fi
+          if [ -z "$PR0_COOKIE_ME" ]; then
+            echo "Missing required secret: PR0_COOKIE_ME"
+            exit 1
+          fi
+          if [ -z "$HF_TOKEN" ]; then
+            echo "Missing required secret: HF_TOKEN"
+            exit 1
+          fi
+          mkdir -p delta
+
+      - name: Snapshot previous state
+        id: pre_state
+        run: |
+          python - <<'PY'
+          import os
+          import json
+          from pathlib import Path
+          state = json.loads(Path("state_incremental.json").read_text(encoding="utf-8-sig"))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"old_last_known_id={state.get('last_known_id','')}\n")
+              out.write(f"old_last_output_db={state.get('last_output_db','')}\n")
+          PY
+
+      - name: Run incremental crawler
+        env:
+          PR0_COOKIE_ME: ${{ secrets.PR0_COOKIE_ME }}
+          MATURITY_DAYS_INPUT: ${{ github.event.inputs.maturity_days }}
+          REQ_THREADS_INPUT: ${{ github.event.inputs.req_threads }}
+          SCAN_MAX_PAGES_INPUT: ${{ github.event.inputs.scan_max_pages }}
+        run: |
+          MATURITY_DAYS="${MATURITY_DAYS_INPUT:-14}"
+          REQ_THREADS="${REQ_THREADS_INPUT:-4}"
+
+          ARGS=(
+            --state-file state_incremental.json
+            --out-dir delta
+            --session-file SESSION
+            --maturity-days "$MATURITY_DAYS"
+            --req-threads "$REQ_THREADS"
+            --cookie "me=$PR0_COOKIE_ME"
+          )
+
+          if [ -n "$SCAN_MAX_PAGES_INPUT" ]; then
+            ARGS+=(--scan-max-pages "$SCAN_MAX_PAGES_INPUT")
+          fi
+
+          python crawler_incremental.py "${ARGS[@]}"
+
+      - name: Snapshot new state
+        id: post_state
+        run: |
+          python - <<'PY'
+          import os
+          import json
+          from pathlib import Path
+          state = json.loads(Path("state_incremental.json").read_text(encoding="utf-8-sig"))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"new_last_known_id={state.get('last_known_id','')}\n")
+              out.write(f"new_last_output_db={state.get('last_output_db','')}\n")
+          PY
+
+      - name: Upload new delta to Hugging Face dataset
+        if: ${{ steps.post_state.outputs.new_last_output_db != '' && steps.post_state.outputs.new_last_output_db != steps.pre_state.outputs.old_last_output_db }}
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          DELTA_PATH: ${{ steps.post_state.outputs.new_last_output_db }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from huggingface_hub import HfApi
+
+          token = os.environ["HF_TOKEN"]
+          local_path = Path(os.environ["DELTA_PATH"])
+          if not local_path.exists():
+              raise FileNotFoundError(f"Delta file from state does not exist: {local_path}")
+
+          api = HfApi()
+          url = api.upload_file(
+              path_or_fileobj=str(local_path),
+              path_in_repo=f"delta/{local_path.name}",
+              repo_id="VIEWVIEWVIEW/pr0gramm-usercomments",
+              repo_type="dataset",
+              token=token,
+              commit_message=f"Upload incremental delta {local_path.name}",
+          )
+          print(f"Uploaded: {url}")
+          PY
+
+      - name: Amend and push state only
+        run: |
+          if [ -n "$(git status --porcelain -- state_incremental.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add state_incremental.json
+            git commit --amend --no-edit
+            git push --force-with-lease
+          else
+            echo "No state changes to amend."
+          fi
