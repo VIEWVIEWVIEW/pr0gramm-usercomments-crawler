@@ -1,6 +1,6 @@
 # pr0gramm-usercomments
 
-This crawler creates a weekly SQLite export of pr0gramm.com item metadata and comments. Comments are only crawled on items older than 2 weeks, so the item gets actual comments by the users and to keep pressure on the pr0gramm.com api low (I only crawl on the night from Sunday to Monay and respect ``Retry-After`` header).
+This crawler creates a weekly SQLite export of pr0gramm.com item metadata and comments. Comments are only crawled on items older than 2 weeks, so the item gets actual comments by the users and to keep pressure on the pr0gramm.com api low (I only crawl on the night from Sunday to Monay and respect ``Retry-After`` header). Comments done on older posts are not contained in this data set, as the goal of this repo is not complete coverage. This repo exists for a stylometry analysis to find potential multi-accounts.
 
 The dataset is available here: https://huggingface.co/datasets/VIEWVIEWVIEW/pr0gramm-usercomments/tree/main
 
