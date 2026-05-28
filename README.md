@@ -1,15 +1,8 @@
 # pr0gramm-usercomments
 
-This crawler creates a weekly SQLite export of pr0gramm.com item metadata and comments (with 2 weeks delay).
+This crawler creates a weekly SQLite export of pr0gramm.com item metadata and comments. Comments are only crawled on items older than 2 weeks, so the item gets actual comments by the users and to keep pressure on the pr0gramm.com api low (I only crawl on the night from Sunday to Monay and respect ``Retry-After`` header).
 
 The dataset is available here: https://huggingface.co/datasets/VIEWVIEWVIEW/pr0gramm-usercomments/tree/main
-
-## Coverage
-
-The current snapshot is fully crawled up to item `6986879`.
-
-- Highest `items.item_id`: `6986879` (`created_at`: `2026-04-17 19:17:36 UTC`)
-- Highest `comments.item_id`: `6986879`
 
 ## Tables
 
