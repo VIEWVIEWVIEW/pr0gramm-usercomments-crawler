@@ -1,20 +1,8 @@
----
-pretty_name: pr0gramm user comments
-license: other
-language:
-- de
-- en
-task_categories:
-- other
----
-
 # pr0gramm-usercomments
 
-This dataset contains a SQLite export of pr0gramm item metadata and comments.
+This crawler creates a weekly SQLite export of pr0gramm.com item metadata and comments (with 2 weeks delay).
 
-Main file:
-
-- `pr0gramm.sqlite3`
+The dataset is available here: https://huggingface.co/datasets/VIEWVIEWVIEW/pr0gramm-usercomments/tree/main
 
 ## Coverage
 
@@ -89,7 +77,7 @@ raw_json (truncated): {"id":6986879,"promoted":0,"userId":132720,"up":1,"down":0
 ## Notes
 
 - Timestamps are stored as Unix seconds.
-- `raw_json` contains API payload snapshots and may include fields not normalized into separate columns.
+- `raw_json` contains API payload snapshots and may include fields not normalized into separate columns. These are scrubbed for the release on huggingface.co btw.
 
 ## Weekly Incremental Delta Crawl
 
